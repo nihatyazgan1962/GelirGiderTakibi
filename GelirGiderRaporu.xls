@@ -1,0 +1,140 @@
+
+<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style>
+  body { font-family: 'Segoe UI', Calibri, Arial, sans-serif; }
+  .title { font-size: 18pt; font-weight: bold; color: #1B5E20; text-align: center; padding: 15px; }
+  .meta { font-size: 10pt; color: #555; }
+  .summary-table { border-collapse: collapse; margin-bottom: 20px; width: 60%; }
+  .summary-th { background-color: #2E7D32; color: #FFF; font-weight: bold; padding: 8px; border: 1px solid #1B5E20; }
+  .summary-td { padding: 8px; border: 1px solid #DDD; font-weight: bold; font-size: 11pt; }
+  .data-table { border-collapse: collapse; width: 100%; }
+  .data-th { background-color: #2E7D32; color: #FFF; font-weight: bold; padding: 10px; border: 1px solid #1B5E20; text-align: left; }
+  .data-td { padding: 8px 10px; border: 1px solid #E0E0E0; font-size: 10pt; }
+  .gelir { color: #2E7D32; font-weight: bold; }
+  .gider { color: #C62828; font-weight: bold; }
+  .badge-gelir { background-color: #E8F5E9; color: #2E7D32; padding: 4px 8px; font-weight: bold; text-align: center; }
+  .badge-gider { background-color: #FFEBEE; color: #C62828; padding: 4px 8px; font-weight: bold; text-align: center; }
+</style>
+</head>
+<body>
+  <div class="title">GELİR VE GİDER TAKİBİ - DETAYLI HESAP EKSTRESİ</div>
+  <table class="meta" style="margin-bottom: 15px;">
+    <tr><td><b>Rapor Kapsamı:</b> 01.09.2026 – 16.09.2026</td><td><b>Tarih:</b> 16.09.2026</td></tr>
+    <tr><td><b>Hesap:</b> Tüm Hesaplar</td><td><b>Alıcı Mail:</b> 1962nihat.ny@gmail</td></tr>
+  </table>
+
+  <h3>Özet Bilgiler</h3>
+  <table class="summary-table">
+    <tr>
+      <th class="summary-th">Toplam Gelir</th>
+      <th class="summary-th">Toplam Gider</th>
+      <th class="summary-th">Net Kalan Bakiye</th>
+    </tr>
+    <tr>
+      <td class="summary-td gelir">+52.500,00 ₺</td>
+      <td class="summary-td gider">-18.650,00 ₺</td>
+      <td class="summary-td" style="color: #2E7D32; font-size: 13pt;">33.850,00 ₺</td>
+    </tr>
+  </table>
+
+  <h3>İşlem Detayları</h3>
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th class="data-th" style="width: 40px;">#</th>
+        <th class="data-th" style="width: 100px;">Tarih</th>
+        <th class="data-th">Açıklama / Başlık</th>
+        <th class="data-th" style="width: 110px;">Tür</th>
+        <th class="data-th" style="width: 130px;">Hesap</th>
+        <th class="data-th" style="width: 130px; text-align: right;">Tutar (TL)</th>
+        <th class="data-th" style="width: 90px; text-align: center;">Tip</th>
+        <th class="data-th">Not</th>
+      </tr>
+    </thead>
+    <tbody>
+      
+        <tr style="background-color: #FFFFFF;">
+          <td class="data-td" style="text-align: center; color: #888;">1</td>
+          <td class="data-td">2026-09-16</td>
+          <td class="data-td" style="font-weight: 600;">Maaş Ödemesi</td>
+          <td class="data-td">Maaş</td>
+          <td class="data-td">Banka Hesabı</td>
+          <td class="data-td gelir" style="text-align: right;">+45.000,00 ₺</td>
+          <td class="data-td badge-gelir">GELIR</td>
+          <td class="data-td" style="color: #666;">Eylül ayı maaşı</td>
+        </tr>
+      
+        <tr style="background-color: #F9FBF9;">
+          <td class="data-td" style="text-align: center; color: #888;">2</td>
+          <td class="data-td">2026-09-15</td>
+          <td class="data-td" style="font-weight: 600;">Kira Ödemesi</td>
+          <td class="data-td">Kira</td>
+          <td class="data-td">Banka Hesabı</td>
+          <td class="data-td gider" style="text-align: right;">-15.000,00 ₺</td>
+          <td class="data-td badge-gider">GIDER</td>
+          <td class="data-td" style="color: #666;">Ev kirası</td>
+        </tr>
+      
+        <tr style="background-color: #FFFFFF;">
+          <td class="data-td" style="text-align: center; color: #888;">3</td>
+          <td class="data-td">2026-09-14</td>
+          <td class="data-td" style="font-weight: 600;">Market Harcaması</td>
+          <td class="data-td">Market</td>
+          <td class="data-td">Nakit Cüzdan</td>
+          <td class="data-td gider" style="text-align: right;">-850,00 ₺</td>
+          <td class="data-td badge-gider">GIDER</td>
+          <td class="data-td" style="color: #666;">Haftalık mutfak alışverişi</td>
+        </tr>
+      
+        <tr style="background-color: #F9FBF9;">
+          <td class="data-td" style="text-align: center; color: #888;">4</td>
+          <td class="data-td">2026-09-12</td>
+          <td class="data-td" style="font-weight: 600;">Benzin & Yakıt</td>
+          <td class="data-td">Ulaşım</td>
+          <td class="data-td">Kredi Kartı</td>
+          <td class="data-td gider" style="text-align: right;">-1.200,00 ₺</td>
+          <td class="data-td badge-gider">GIDER</td>
+          <td class="data-td" style="color: #666;">Araç yakıtı</td>
+        </tr>
+      
+        <tr style="background-color: #FFFFFF;">
+          <td class="data-td" style="text-align: center; color: #888;">5</td>
+          <td class="data-td">2026-09-10</td>
+          <td class="data-td" style="font-weight: 600;">Elektrik & Su Faturası</td>
+          <td class="data-td">Fatura</td>
+          <td class="data-td">Banka Hesabı</td>
+          <td class="data-td gider" style="text-align: right;">-950,00 ₺</td>
+          <td class="data-td badge-gider">GIDER</td>
+          <td class="data-td" style="color: #666;">Ev faturaları</td>
+        </tr>
+      
+        <tr style="background-color: #F9FBF9;">
+          <td class="data-td" style="text-align: center; color: #888;">6</td>
+          <td class="data-td">2026-09-08</td>
+          <td class="data-td" style="font-weight: 600;">Ek Gelir (Danışmanlık)</td>
+          <td class="data-td">Ek Gelir</td>
+          <td class="data-td">Banka Hesabı</td>
+          <td class="data-td gelir" style="text-align: right;">+7.500,00 ₺</td>
+          <td class="data-td badge-gelir">GELIR</td>
+          <td class="data-td" style="color: #666;">Freelance proje geliri</td>
+        </tr>
+      
+        <tr style="background-color: #FFFFFF;">
+          <td class="data-td" style="text-align: center; color: #888;">7</td>
+          <td class="data-td">2026-09-05</td>
+          <td class="data-td" style="font-weight: 600;">Dışarıda Yemek</td>
+          <td class="data-td">Yemek</td>
+          <td class="data-td">Kredi Kartı</td>
+          <td class="data-td gider" style="text-align: right;">-650,00 ₺</td>
+          <td class="data-td badge-gider">GIDER</td>
+          <td class="data-td" style="color: #666;">Aile yemeği</td>
+        </tr>
+      
+    </tbody>
+  </table>
+  <br>
+  <p style="font-size: 9pt; color: #888;">Bu rapor Gelir Gider Pro uygulaması tarafından oluşturulmuştur.</p>
+</body>
+</html>
