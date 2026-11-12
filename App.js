@@ -1,8 +1,8 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import {
   StyleSheet, Text, View, SafeAreaView, StatusBar, ScrollView,
   TouchableOpacity, Modal, TextInput, Alert, Platform,
-  KeyboardAvoidingView, Dimensions, Linking, Share
+  KeyboardAvoidingView, Dimensions, Linking, Share, Keyboard
 } from 'react-native';
 
 import {
@@ -13,7 +13,8 @@ import {
   getPinCode, setPinCode, isPinEnabled, setPinEnabled,
   getRecurringTransactions, addRecurringTransaction, deleteRecurringTransaction,
   getCategoryBudgets, setCategoryBudget, deleteCategoryBudget,
-  exportAllData, importAllData
+  exportAllData, importAllData,
+  getCarryoverEnabled, setCarryoverEnabled
 } from './src/database';
 
 import {
@@ -45,6 +46,8 @@ const CATEGORY_MAP = {
   'Yatırım': { icon: '📈', bg: '#E1F5FE', color: '#0288D1' },
   'Harçlık': { icon: '🪙', bg: '#FFFDE7', color: '#FBC02D' },
   'Ödemeler': { icon: '💳', bg: '#EDE7F6', color: '#512DA8' },
+  'K. Kartı': { icon: '💳', bg: '#FFF8E1', color: '#F57F17' },
+  'Kredi Kartı': { icon: '💳', bg: '#FFF8E1', color: '#F57F17' },
   'Market': { icon: '🛒', bg: '#FFF3E0', color: '#E65100' },
   'Kira': { icon: '🏠', bg: '#FFEBEE', color: '#C62828' },
   'Fatura': { icon: '💡', bg: '#F3E5F5', color: '#7B1FA2' },
@@ -77,6 +80,7 @@ function getCategoryMeta(title, type) {
     if (t.includes('eğlence') || t.includes('sinema')) return { icon: '🎬', bg: '#FCE4EC', color: '#C2185B' };
     if (t.includes('giyim')) return { icon: '👕', bg: '#EDE7F6', color: '#512DA8' };
     if (t.includes('transfer') || t.includes('virman')) return { icon: '💸', bg: '#E0F7FA', color: '#00838F' };
+    if (t.includes('kart') || t.includes('k.k') || t.includes('kredi')) return { icon: '💳', bg: '#FFF8E1', color: '#F57F17' };
     return { icon: '📌', bg: '#ECEFF1', color: '#455A64' };
   }
 }
@@ -341,17 +345,58 @@ const tp = StyleSheet.create({
 });
 
 // ── TAM EKRAN İŞLEM FORMU ─────────────────────────────────────────────────────
-function TransactionScreen({ visible, editData, accounts, categories, currency, onClose, onSave, onAddNewCategory }) {
-  const isEdit = !!editData;
-  const [txType, setTxType] = useState('gider'); // 'gider' | 'gelir' | 'transfer'
+function TransactionScreen({ visible, editData, accounts, categories, currency, onClose, onSave, onAddNewCategory, onDelete }) {
+  // Sadece id'si olan kayıtlar düzenleme sayılır ({ type } veya { accountId } ile açılan form yeni kayıttır)
+  const isEdit = !!editData?.id;
+  const [txType, setTxType] = useState('gider'); // 'gider' | 'gelir'
+  const [accountId, setAccountId] = useState('acc_nakit');
   const [tur, setTur] = useState('Ödemeler');
   const [miktar, setMiktar] = useState('');
   const [tarih, setTarih] = useState(new Date().toISOString().split('T')[0]);
   const [not, setNot] = useState('');
-  const [accountId, setAccountId] = useState('');
-  const [targetAccountId, setTargetAccountId] = useState('');
   const [turPickerOpen, setTurPickerOpen] = useState(false);
   const [datePickerOpen, setDatePickerOpen] = useState(false);
+  const scrollRef = useRef(null);
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+
+  const handleDeleteFromEdit = () => {
+    Alert.alert(
+      'İşlemi Sil',
+      `"${tur}" (${miktar || 0} ${currency.symbol}) kaydını silmek istediğinize emin misiniz?\n\nBu işlem geri alınamaz.`,
+      [
+        { text: 'Vazgeç', style: 'cancel' },
+        {
+          text: 'Evet, Sil',
+          style: 'destructive',
+          onPress: async () => {
+            if (onDelete && editData?.id) {
+              await onDelete(editData.id, editData.title || tur);
+            }
+            onClose();
+          }
+        }
+      ]
+    );
+  };
+
+  useEffect(() => {
+    const showSub = Keyboard.addListener(
+      Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow',
+      (e) => {
+        setKeyboardHeight(e?.endCoordinates?.height || 260);
+      }
+    );
+    const hideSub = Keyboard.addListener(
+      Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide',
+      () => {
+        setKeyboardHeight(0);
+      }
+    );
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
 
   useEffect(() => {
     if (visible) {
@@ -361,16 +406,14 @@ function TransactionScreen({ visible, editData, accounts, categories, currency, 
         setMiktar(String(editData.amount || ''));
         setTarih(editData.date || new Date().toISOString().split('T')[0]);
         setNot(editData.note || '');
-        setAccountId(editData.accountId || (accounts[0]?.id || ''));
-        setTargetAccountId(accounts.length > 1 ? accounts[1].id : (accounts[0]?.id || ''));
+        setAccountId(editData.accountId || (accounts[0]?.id || 'acc_nakit'));
       } else {
+        setAccountId(accounts[0]?.id || 'acc_nakit');
         setTxType('gider');
         setTur(categories.gider[0] || 'Ödemeler');
         setMiktar('');
         setTarih(new Date().toISOString().split('T')[0]);
         setNot('');
-        setAccountId(accounts[0]?.id || '');
-        setTargetAccountId(accounts.length > 1 ? accounts[1].id : (accounts[0]?.id || ''));
       }
     }
   }, [visible, editData, categories, accounts]);
@@ -386,20 +429,12 @@ function TransactionScreen({ visible, editData, accounts, categories, currency, 
   const handleSave = () => {
     const amt = parseFloat(miktar.replace(',','.'));
     if (isNaN(amt) || amt <= 0) { Alert.alert('Hata', 'Geçerli bir tutar girin.'); return; }
-    
-    if (txType === 'transfer') {
-      if (!accountId || !targetAccountId || accountId === targetAccountId) {
-        Alert.alert('Hata', 'Lütfen farklı çıkış ve giriş hesapları seçin.');
-        return;
-      }
-    }
 
     const tx = {
       id: editData?.id || Date.now().toString(),
-      accountId: accountId || (accounts[0]?.id || 'acc_nakit'),
-      targetAccountId: targetAccountId || '',
+      accountId: accountId,
       type: txType,
-      title: txType === 'transfer' ? 'Hesap Transferi' : tur,
+      title: tur,
       amount: amt,
       date: tarih,
       note: not.trim(),
@@ -408,7 +443,7 @@ function TransactionScreen({ visible, editData, accounts, categories, currency, 
   };
 
   return (
-    <Modal visible={visible} animationType="slide" statusBarTranslucent onRequestClose={onClose}>
+    <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
       <SafeAreaView style={ts.safe}>
         <StatusBar barStyle="light-content" backgroundColor={GREEN_DARK} />
 
@@ -429,54 +464,43 @@ function TransactionScreen({ visible, editData, accounts, categories, currency, 
               onPress={() => { setTxType('gelir'); setTur(categories.gelir[0] || 'Maaş'); }}>
               <Text style={[ts.toggleTabTxt, txType === 'gelir' && ts.toggleTabTxtActive]}>Gelir</Text>
             </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[ts.toggleTab, txType === 'transfer' && ts.toggleTabActiveTransfer]}
-              onPress={() => { setTxType('transfer'); }}>
-              <Text style={[ts.toggleTabTxt, txType === 'transfer' && ts.toggleTabTxtActive]}>Transfer</Text>
-            </TouchableOpacity>
           </View>
         </View>
 
-        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
-          <ScrollView style={ts.scroll} keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingBottom: 20 }}>
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          style={{ flex: 1 }}>
+          <ScrollView
+            ref={scrollRef}
+            style={ts.scroll}
+            keyboardShouldPersistTaps="handled"
+            contentContainerStyle={{ paddingBottom: keyboardHeight > 0 ? keyboardHeight + 80 : 160 }}>
 
-            {/* Normal Hesap veya Transfer Çıkış Hesabı */}
-            <View style={ts.formSection}>
-              <Text style={ts.sectionTitle}>{txType === 'transfer' ? 'ÇIKIŞ HESABI (Nereden)' : 'HESAP / CÜZDAN'}</Text>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={ts.accountRow}>
-                {accounts.map(acc => (
-                  <TouchableOpacity key={acc.id} style={[ts.accPill, accountId===acc.id && ts.accPillActive]} onPress={()=>setAccountId(acc.id)}>
-                    <Text style={[ts.accPillTxt, accountId===acc.id && ts.accPillTxtActive]}>{acc.icon} {acc.name}</Text>
+            {/* Tür / Kategori */}
+            <TouchableOpacity style={ts.formRow} onPress={()=>setTurPickerOpen(true)}>
+              <Text style={ts.rowLabel}>Tür</Text>
+              <View style={ts.rowRight}>
+                <Text style={ts.rowValue}>{tur}</Text>
+                <Text style={ts.rowArrow}>▼</Text>
+              </View>
+            </TouchableOpacity>
+
+            {/* Hesap Seçimi (Nakit / Banka / Kredi Kartı) */}
+            <View style={ts.formRow}>
+              <Text style={ts.rowLabel}>Hesap</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6 }}>
+                {(accounts || []).map(acc => (
+                  <TouchableOpacity
+                    key={acc.id}
+                    style={[ts.accPill, accountId === acc.id && ts.accPillActive]}
+                    onPress={() => setAccountId(acc.id)}>
+                    <Text style={[ts.accPillTxt, accountId === acc.id && ts.accPillTxtActive]}>
+                      {acc.icon} {acc.name}
+                    </Text>
                   </TouchableOpacity>
                 ))}
               </ScrollView>
             </View>
-
-            {/* Transfer Giriş Hesabı */}
-            {txType === 'transfer' && (
-              <View style={ts.formSection}>
-                <Text style={ts.sectionTitle}>GİRİŞ HESABI (Nereye)</Text>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={ts.accountRow}>
-                  {accounts.map(acc => (
-                    <TouchableOpacity key={acc.id} style={[ts.accPill, targetAccountId===acc.id && ts.accPillActiveTarget]} onPress={()=>setTargetAccountId(acc.id)}>
-                      <Text style={[ts.accPillTxt, targetAccountId===acc.id && ts.accPillTxtActive]}>{acc.icon} {acc.name}</Text>
-                    </TouchableOpacity>
-                  ))}
-                </ScrollView>
-              </View>
-            )}
-
-            {/* Tür / Kategori (Transferde gizlenir) */}
-            {txType !== 'transfer' && (
-              <TouchableOpacity style={ts.formRow} onPress={()=>setTurPickerOpen(true)}>
-                <Text style={ts.rowLabel}>Tür</Text>
-                <View style={ts.rowRight}>
-                  <Text style={ts.rowValue}>{tur}</Text>
-                  <Text style={ts.rowArrow}>▼</Text>
-                </View>
-              </TouchableOpacity>
-            )}
 
             {/* Miktar */}
             <View style={ts.formRow}>
@@ -544,6 +568,13 @@ function TransactionScreen({ visible, editData, accounts, categories, currency, 
                 placeholderTextColor="#AAA"
                 value={not}
                 onChangeText={setNot}
+                returnKeyType="done"
+                blurOnSubmit={true}
+                onFocus={() => {
+                  setTimeout(() => {
+                    scrollRef.current?.scrollToEnd({ animated: true });
+                  }, 250);
+                }}
               />
             </View>
 
@@ -551,10 +582,15 @@ function TransactionScreen({ visible, editData, accounts, categories, currency, 
 
           {/* Alt Butonlar */}
           <View style={ts.bottomRow}>
-            <TouchableOpacity style={ts.kaydetBtn} onPress={handleSave}>
-              <Text style={ts.kaydetTxt}>KAYDET</Text>
+            {isEdit && (
+              <TouchableOpacity style={ts.silBtn} onPress={handleDeleteFromEdit}>
+                <Text style={ts.silTxt}>🗑️ SİL</Text>
+              </TouchableOpacity>
+            )}
+            <TouchableOpacity style={[ts.kaydetBtn, isEdit && { flex: 1.3 }]} onPress={handleSave}>
+              <Text style={ts.kaydetTxt}>{isEdit ? 'GÜNCELLE' : 'KAYDET'}</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={ts.vazgecBtn} onPress={onClose}>
+            <TouchableOpacity style={[ts.vazgecBtn, isEdit && { flex: 0.9 }]} onPress={onClose}>
               <Text style={ts.vazgecTxt}>VAZGEÇ</Text>
             </TouchableOpacity>
           </View>
@@ -565,7 +601,14 @@ function TransactionScreen({ visible, editData, accounts, categories, currency, 
       <CategoryPicker
         visible={turPickerOpen}
         items={turListesi}
-        onSelect={setTur}
+        onSelect={(selectedTur) => {
+          setTur(selectedTur);
+          const lower = (selectedTur || '').toLocaleLowerCase('tr-TR');
+          if (lower.includes('kart') || lower.includes('kredi') || lower.includes('k.k')) {
+            const cc = (accounts || []).find(a => a.id === 'acc_kredikarti' || (a.name || '').toLocaleLowerCase('tr-TR').includes('kredi'));
+            if (cc) setAccountId(cc.id);
+          }
+        }}
         onClose={()=>setTurPickerOpen(false)}
         onAddNew={() => {
           setTurPickerOpen(false);
@@ -682,6 +725,17 @@ const ts = StyleSheet.create({
     justifyContent: 'center',
   },
   vazgecTxt: { color: '#546E7A', fontWeight: '700', fontSize: 15 },
+  silBtn: {
+    flex: 1,
+    backgroundColor: '#FFEBEE',
+    paddingVertical: 15,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#FFCDD2',
+  },
+  silTxt: { color: RED, fontWeight: '800', fontSize: 15 },
 });
 
 // ─── Rapor Tarih Seçici ───────────────────────────────────────────────────────
@@ -871,6 +925,9 @@ export default function App() {
   const [editingBudgetCat, setEditingBudgetCat] = useState(null);
   const [editingBudgetAmount, setEditingBudgetAmount] = useState('');
 
+  // Önceki Aydan Bakiye Devri
+  const [carryoverEnabled, setCarryoverEnabledState] = useState(true);
+
   // Sıralama
   const [sortOrder, setSortOrder] = useState('date_desc'); // 'date_desc' | 'amount_desc' | 'amount_asc'
 
@@ -890,7 +947,7 @@ export default function App() {
   };
 
   const loadAll = async () => {
-    const [txs, accs, cats, cur, activeAcc, pin, pinActive, recs, bgts] = await Promise.all([
+    const [txs, accs, cats, cur, activeAcc, pin, pinActive, recs, bgts, carryover] = await Promise.all([
       getTransactions(),
       getAccounts(),
       getCategories(),
@@ -900,6 +957,7 @@ export default function App() {
       isPinEnabled(),
       getRecurringTransactions(),
       getCategoryBudgets(),
+      getCarryoverEnabled(),
     ]);
     setTransactions(txs || []);
     setAccounts(accs || []);
@@ -909,6 +967,7 @@ export default function App() {
     setPinEnabledState(pinActive);
     setRecurringList(recs || []);
     setBudgets(bgts || {});
+    setCarryoverEnabledState(carryover);
     if (pinActive && pin) {
       setPinLocked(true);
     }
@@ -916,19 +975,43 @@ export default function App() {
     await refreshBackupData();
   };
 
+  // Kredi Kartı hesabı
+  const creditCardAccount = useMemo(() => (
+    accounts.find(a => a.id === 'acc_kredikarti') ||
+    accounts.find(a => (a.name || '').toLocaleLowerCase('tr-TR').includes('kredi'))
+  ), [accounts]);
+
+  // Bir işlemin kredi kartı işlemi olup olmadığını tespit eden yardımcı fonksiyon
+  const isCreditCardTx = useCallback((tx) => {
+    if (!tx) return false;
+    if (tx.accountId === 'acc_kredikarti') return true;
+    if (creditCardAccount && tx.accountId === creditCardAccount.id) return true;
+    const title = (tx.title || '').toLocaleLowerCase('tr-TR');
+    const note = (tx.note || '').toLocaleLowerCase('tr-TR');
+    return title.includes('kart') || title.includes('kredi') || title.includes('k.k') ||
+           note.includes('kredi kart') || note.includes('k.kart');
+  }, [creditCardAccount]);
+
   // Tüm hesapların gerçek zamanlı bakiyeleri
   const accountBalances = useMemo(() => {
     const map = {};
     accounts.forEach(acc => { map[acc.id] = 0; });
+    const ccId = creditCardAccount?.id || 'acc_kredikarti';
+    if (map[ccId] === undefined) map[ccId] = 0;
+
     transactions.forEach(t => {
       const amt = parseFloat(t.amount) || 0;
-      if (map[t.accountId] !== undefined) {
-        if (t.type === 'gelir') map[t.accountId] += amt;
-        else map[t.accountId] -= amt;
+      let targetAccId = t.accountId;
+      if (isCreditCardTx(t) && targetAccId !== ccId && (!targetAccId || targetAccId === 'acc_nakit' || targetAccId === 'acc_genel')) {
+        targetAccId = ccId;
+      }
+      if (map[targetAccId] !== undefined) {
+        if (t.type === 'gelir') map[targetAccId] += amt;
+        else map[targetAccId] -= amt;
       }
     });
     return map;
-  }, [accounts, transactions]);
+  }, [accounts, transactions, creditCardAccount, isCreditCardTx]);
 
   // Son 6 ay diyagram verisi
   const chartData = useMemo(() => {
@@ -979,7 +1062,11 @@ export default function App() {
         : d.getFullYear() === filterYear && d.getMonth() === filterMonth;
       if (!matchesPeriod) return false;
 
-      if (searchTypeFilter !== 'all' && tx.type !== searchTypeFilter) return false;
+      if (searchTypeFilter === 'kart') {
+        if (!isCreditCardTx(tx)) return false;
+      } else if (searchTypeFilter !== 'all' && tx.type !== searchTypeFilter) {
+        return false;
+      }
 
       if (searchOpen && searchQuery.trim()) {
         const q = searchQuery.toLowerCase();
@@ -998,23 +1085,102 @@ export default function App() {
     } else {
       return [...list].sort((a, b) => new Date(b.date) - new Date(a.date));
     }
-  }, [transactions, selectedAccountId, filterYear, filterMonth, searchOpen, searchQuery, searchTypeFilter, sortOrder]);
+  }, [transactions, selectedAccountId, filterYear, filterMonth, searchOpen, searchQuery, searchTypeFilter, sortOrder, isCreditCardTx]);
 
   const gelirTxs = useMemo(() => filteredTransactions.filter(t => t.type === 'gelir'), [filteredTransactions]);
   const giderTxs = useMemo(() => filteredTransactions.filter(t => t.type === 'gider'), [filteredTransactions]);
   const totalIncome = useMemo(() => gelirTxs.reduce((s,t) => s+(parseFloat(t.amount)||0), 0), [gelirTxs]);
   const totalExpense = useMemo(() => giderTxs.reduce((s,t) => s+(parseFloat(t.amount)||0), 0), [giderTxs]);
-  const balance = totalIncome - totalExpense;
+  
+  // Seçili dönemin net bakiyesi (Gelir - Gider)
+  const netPeriodBalance = totalIncome - totalExpense;
+
+  // Önceki aylardan devreden kümülatif bakiye hesabı
+  const carryoverBalance = useMemo(() => {
+    let sum = 0;
+    transactions.forEach(tx => {
+      if (selectedAccountId !== 'all' && tx.accountId !== selectedAccountId) return;
+      const d = new Date(tx.date);
+      const txYear = d.getFullYear();
+      const txMonth = d.getMonth();
+      const isPrior = filterMonth === -1
+        ? txYear < filterYear
+        : (txYear < filterYear || (txYear === filterYear && txMonth < filterMonth));
+      
+      if (isPrior) {
+        const val = parseFloat(tx.amount) || 0;
+        if (tx.type === 'gelir') sum += val;
+        else if (tx.type === 'gider') sum -= val;
+      }
+    });
+    return sum;
+  }, [transactions, selectedAccountId, filterYear, filterMonth]);
+
+  // Net Toplam Varlık (Dönem Gelir - Gider Neti, Devir açıksa devirli net)
+  const balance = carryoverEnabled
+    ? (carryoverBalance + netPeriodBalance)
+    : netPeriodBalance;
+
+  // Tüm Hesapların Toplamı (Nakit Cüzdan + Kredi Kartı + Banka vb. hesapların anlık toplam varlığı)
+  const totalAccountsBalance = useMemo(() => {
+    let sum = 0;
+    Object.values(accountBalances).forEach(b => { sum += b; });
+    return sum;
+  }, [accountBalances]);
 
   const fmt = (val) => `${(Math.abs(val)||0).toLocaleString('tr-TR',{minimumFractionDigits:2,maximumFractionDigits:2})} ${currency.symbol}`;
+  // Hızlı butonlar için kısa (kuruşsuz) format
+  const fmtShort = (val) => `${(Math.abs(val)||0).toLocaleString('tr-TR',{maximumFractionDigits:0})} ${currency.symbol}`;
+
+  // Aktif filtrelenen dönemdeki kart harcamaları (harcama pozitif)
+  const cardPeriodSpent = useMemo(() => {
+    let sum = 0;
+    filteredTransactions.forEach(t => {
+      if (isCreditCardTx(t)) {
+        const amt = parseFloat(t.amount) || 0;
+        if (t.type === 'gider') sum += amt;
+        else sum -= amt;
+      }
+    });
+    return sum;
+  }, [filteredTransactions, isCreditCardTx]);
+
+  // Tüm zamanlardaki kart harcaması / bakiyesi
+  const cardAllTimeSpent = useMemo(() => {
+    let sum = 0;
+    transactions.forEach(t => {
+      if (isCreditCardTx(t)) {
+        const amt = parseFloat(t.amount) || 0;
+        if (t.type === 'gider') sum += amt;
+        else sum -= amt;
+      }
+    });
+    return sum;
+  }, [transactions, isCreditCardTx]);
+
+  // Kredi Kartı gösterim metni
+  const creditCardDisplay = useMemo(() => {
+    if (cardPeriodSpent > 0) {
+      return { val: cardPeriodSpent, formatted: `-${fmtShort(cardPeriodSpent)}` };
+    } else if (cardPeriodSpent < 0) {
+      return { val: cardPeriodSpent, formatted: `+${fmtShort(Math.abs(cardPeriodSpent))}` };
+    } else if (cardAllTimeSpent > 0) {
+      return { val: cardAllTimeSpent, formatted: `-${fmtShort(cardAllTimeSpent)}` };
+    } else if (cardAllTimeSpent < 0) {
+      return { val: cardAllTimeSpent, formatted: `+${fmtShort(Math.abs(cardAllTimeSpent))}` };
+    } else {
+      return { val: 0, formatted: `0 ${currency.symbol}` };
+    }
+  }, [cardPeriodSpent, cardAllTimeSpent, currency]);
+
+  const creditCardBalance = creditCardAccount ? (accountBalances[creditCardAccount.id] || 0) : 0;
 
   // Başlık altı bilgisi
   const headerSubtitle = useMemo(() => {
-    const acc = selectedAccountId==='all' ? 'Tüm kayıtlar' : (accounts.find(a=>a.id===selectedAccountId)?.name || '');
     return filterMonth===-1
-      ? `${filterYear} (TÜM YIL) · ${acc}`
-      : `${filterYear} ${MONTHS_FULL[filterMonth].toUpperCase()} · ${acc}`;
-  }, [filterYear, filterMonth, selectedAccountId, accounts]);
+      ? `${filterYear} (TÜM YIL)`
+      : `${filterYear} ${MONTHS_FULL[filterMonth].toUpperCase()}`;
+  }, [filterYear, filterMonth]);
 
   // Ay İleri / Geri Hızlı Gezinti
   const handlePrevMonth = () => {
@@ -1108,29 +1274,38 @@ export default function App() {
 
   // ── Sil ───────────────────────────────────────────────────────────────────
   const handleDelete = (id, title) => {
-    Alert.alert('Sil', `"${title}" silinsin mi?`, [
-      { text: 'Vazgeç', style:'cancel' },
-      { text:'Sil', style:'destructive', onPress: async () => {
-        const u = await deleteTransaction(id);
-        if(u) {
-          setTransactions(u);
-          await triggerAutoBackup();
-          await refreshBackupData();
+    Alert.alert(
+      'İşlemi Sil',
+      `"${title || 'Bu işlem'}" kaydını silmek istediğinize emin misiniz?\n\nBu işlem geri alınamaz.`,
+      [
+        { text: 'Vazgeç', style: 'cancel' },
+        {
+          text: 'Evet, Sil',
+          style: 'destructive',
+          onPress: async () => {
+            const u = await deleteTransaction(id);
+            if (u) {
+              setTransactions(u);
+              await triggerAutoBackup();
+              await refreshBackupData();
+            }
+            setActionTxModalVisible(false);
+          }
         }
-        setActionTxModalVisible(false);
-      }}
-    ]);
+      ]
+    );
   };
 
   const handleClearAll = () => {
-    Alert.alert('Tüm Kayıtları Sil', 'Tüm gelir ve gider kayıtlarınız kalıcı olarak silinecektir. Bu işlem geri alınamaz!\n\nEmin misiniz?', [
+    Alert.alert('Tüm Kayıtları Sıfırla', 'Nakit Cüzdan, Banka, Kredi Kartı ve tüm aylardaki geçmiş gelir/gider kayıtlarınız tamamen silinecektir.\n\nBu işlem geri alınamaz! Emin misiniz?', [
       { text:'Vazgeç', style:'cancel' },
       { text:'Evet, Hepsini Sil', style:'destructive', onPress: async () => {
         const u = await clearAllTransactions();
         if(u!==null) {
-          setTransactions(u);
+          setTransactions([]);
           await triggerAutoBackup();
           await refreshBackupData();
+          Alert.alert('Başarılı', 'Tüm hesaplar ve aylardaki kayıtlar başarıyla silindi.');
         }
         setMenuVisible(false);
         setAyarlarModalVisible(false);
@@ -1496,7 +1671,10 @@ export default function App() {
   // ── İşlem Satırı (Yeni Özgün Kart Tasarımı) ───────────────────────────────
   const renderTxItem = (item) => {
     const acc = accounts.find(a => a.id === item.accountId);
-    const cat = getCategoryMeta(item.title, item.type);
+    const isCard = isCreditCardTx(item);
+    const cat = isCard
+      ? { icon: '💳', bg: '#FFF8E1', color: '#F57F17' }
+      : getCategoryMeta(item.title, item.type);
     const isIncome = item.type === 'gelir';
     return (
       <TouchableOpacity
@@ -1513,7 +1691,7 @@ export default function App() {
         <View style={s.modernTxInfo}>
           <Text style={s.modernTxTitle} numberOfLines={1}>{item.title}</Text>
           <Text style={s.modernTxSub} numberOfLines={1}>
-            {acc ? acc.name : 'Hesap'} • {formatDate(item.date)}
+            {formatDate(item.date)}
             {item.note ? ` • ${item.note}` : ''}
           </Text>
         </View>
@@ -1585,7 +1763,8 @@ export default function App() {
             {[
               { id: 'all', label: 'Tümü' },
               { id: 'gelir', label: '🟢 Gelirler' },
-              { id: 'gider', label: '🔴 Giderler' }
+              { id: 'gider', label: '🔴 Giderler' },
+              { id: 'kart', label: '💳 K. Kartı' },
             ].map(f => (
               <TouchableOpacity
                 key={f.id}
@@ -1618,43 +1797,80 @@ export default function App() {
         
         {/* ── HERO BAKİYE KARTI (ZÜMRÜT YEŞİLİ) ── */}
         <View style={s.heroCard}>
-          <Text style={s.heroLabel}>NET TOPLAM VARLIK</Text>
+          <Text style={s.heroLabel}>BAKİYE</Text>
           <Text style={s.heroAmount}>{fmt(balance)}</Text>
 
-          {/* Gelir / Gider Hapları */}
+          {/* Devir Hapı */}
           <View style={s.heroBadgesRow}>
-            <View style={s.heroBadgeInc}>
-              <Text style={s.heroBadgeIncTxt}>↑ Gelir: +{fmt(totalIncome)}</Text>
-            </View>
-            <View style={s.heroBadgeExp}>
-              <Text style={s.heroBadgeExpTxt}>↓ Gider: -{fmt(totalExpense)}</Text>
-            </View>
+            {carryoverEnabled && carryoverBalance !== 0 && (
+              <View style={s.heroBadgeDevir}>
+                <Text style={s.heroBadgeDevirTxt}>
+                  🔄 Devir: {carryoverBalance >= 0 ? '+' : ''}{fmt(carryoverBalance)}
+                </Text>
+              </View>
+            )}
           </View>
 
-          {/* Hızlı Butonlar */}
+          {/* Hızlı Butonlar (Gelir, Gider, Kredi Kartı, Raporlar) */}
           <View style={s.heroActionsRow}>
             <TouchableOpacity
               style={s.heroActionBtn}
               onPress={() => {
-                setEditingTx({ type: 'transfer' });
+                setEditingTx({ type: 'gelir' });
                 setTxScreenVisible(true);
               }}>
-              <Text style={s.heroActionIcon}>💸</Text>
-              <Text style={s.heroActionTxt}>Virman</Text>
+              <Text style={s.heroActionIcon}>📈</Text>
+              <Text style={s.heroActionTxt}>Gelir</Text>
+              <Text style={[s.heroActionAmt, { color: '#A7F3D0' }]} numberOfLines={1} adjustsFontSizeToFit>
+                +{fmtShort(totalIncome)}
+              </Text>
             </TouchableOpacity>
 
             <TouchableOpacity
               style={s.heroActionBtn}
-              onPress={() => setRecurringModalVisible(true)}>
-              <Text style={s.heroActionIcon}>🔁</Text>
-              <Text style={s.heroActionTxt}>Sabitler</Text>
+              onPress={() => {
+                setEditingTx({ type: 'gider' });
+                setTxScreenVisible(true);
+              }}>
+              <Text style={s.heroActionIcon}>📉</Text>
+              <Text style={s.heroActionTxt}>Gider</Text>
+              <Text style={[s.heroActionAmt, { color: '#FCA5A5' }]} numberOfLines={1} adjustsFontSizeToFit>
+                -{fmtShort(totalExpense)}
+              </Text>
             </TouchableOpacity>
 
             <TouchableOpacity
-              style={s.heroActionBtn}
-              onPress={() => setBudgetModalVisible(true)}>
-              <Text style={s.heroActionIcon}>🎯</Text>
-              <Text style={s.heroActionTxt}>Bütçeler</Text>
+              style={[s.heroActionBtn, searchTypeFilter === 'kart' && { backgroundColor: 'rgba(253, 230, 138, 0.35)' }]}
+              onPress={() => {
+                if (cardPeriodSpent !== 0 || searchTypeFilter === 'kart') {
+                  Alert.alert(
+                    'Kredi Kartı',
+                    `Dönem Kart Harcaması: ${creditCardDisplay.formatted}\n\nNe yapmak istersiniz?`,
+                    [
+                      {
+                        text: searchTypeFilter === 'kart' ? 'Tüm İşlemleri Göster' : 'Kart Harcamalarını Listele',
+                        onPress: () => setSearchTypeFilter(prev => prev === 'kart' ? 'all' : 'kart')
+                      },
+                      {
+                        text: '💳 Yeni Harcama Ekle',
+                        onPress: () => {
+                          setEditingTx({ type: 'gider', accountId: creditCardAccount?.id || 'acc_kredikarti', title: 'K. Kartı' });
+                          setTxScreenVisible(true);
+                        }
+                      },
+                      { text: 'Vazgeç', style: 'cancel' }
+                    ]
+                  );
+                } else {
+                  setEditingTx({ type: 'gider', accountId: creditCardAccount?.id || 'acc_kredikarti', title: 'K. Kartı' });
+                  setTxScreenVisible(true);
+                }
+              }}>
+              <Text style={s.heroActionIcon}>💳</Text>
+              <Text style={s.heroActionTxt} numberOfLines={1} adjustsFontSizeToFit>Kredi Kartı</Text>
+              <Text style={[s.heroActionAmt, { color: '#FDE68A' }]} numberOfLines={1} adjustsFontSizeToFit>
+                {creditCardDisplay.formatted}
+              </Text>
             </TouchableOpacity>
 
             <TouchableOpacity style={s.heroActionBtn} onPress={() => setReportModalVisible(true)}>
@@ -1664,52 +1880,6 @@ export default function App() {
           </View>
         </View>
 
-        {/* ── HESAPLAR YATAY ŞERİDİ (ACCOUNTS CAROUSEL) ── */}
-        <View style={s.accountSection}>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.accountChipsRow}>
-            <TouchableOpacity
-              style={[s.accountChip, selectedAccountId === 'all' && s.accountChipActive]}
-              onPress={() => {
-                setSelectedAccountId('all');
-                setActiveAccountId('all');
-              }}>
-              <Text style={s.accountChipIcon}>🏛️</Text>
-              <View>
-                <Text style={[s.accountChipName, selectedAccountId === 'all' && s.accountChipActiveTxt]}>Tüm Hesaplar</Text>
-                <Text style={s.accountChipBal}>{fmt(balance)}</Text>
-              </View>
-            </TouchableOpacity>
-
-            {accounts.map(acc => {
-              const accBal = accountBalances[acc.id] || 0;
-              const isSelected = selectedAccountId === acc.id;
-              return (
-                <TouchableOpacity
-                  key={acc.id}
-                  style={[s.accountChip, isSelected && s.accountChipActive]}
-                  onPress={() => {
-                    setSelectedAccountId(acc.id);
-                    setActiveAccountId(acc.id);
-                  }}>
-                  <Text style={s.accountChipIcon}>{acc.icon || '💳'}</Text>
-                  <View>
-                    <Text style={[s.accountChipName, isSelected && s.accountChipActiveTxt]}>{acc.name}</Text>
-                    <Text style={[s.accountChipBal, { color: accBal >= 0 ? '#1B5E20' : '#C62828' }]}>
-                      {fmt(accBal)}
-                    </Text>
-                  </View>
-                </TouchableOpacity>
-              );
-            })}
-
-            <TouchableOpacity
-              style={[s.accountChip, { borderStyle: 'dashed', borderColor: '#80CBC4', backgroundColor: '#F0FAF8' }]}
-              onPress={() => setNewAccountModalVisible(true)}>
-              <Text style={s.accountChipIcon}>➕</Text>
-              <Text style={[s.accountChipName, { color: '#00796B', marginTop: 2 }]}>Hesap Ekle</Text>
-            </TouchableOpacity>
-          </ScrollView>
-        </View>
 
         {/* ── İŞLEMLER LİSTESİ (ÖZGÜN KARTLAR) ── */}
         <View style={s.txSection}>
@@ -1719,6 +1889,23 @@ export default function App() {
             </Text>
             <Text style={s.txCountBadge}>{filteredTransactions.length} Kayıt</Text>
           </View>
+
+          {/* Önceki Aydan Devreden Bakiye Bilgi Kartı */}
+          {carryoverEnabled && carryoverBalance !== 0 && (
+            <View style={s.carryoverCard}>
+              <View style={s.carryoverIconBox}>
+                <Text style={{ fontSize: 20 }}>🔄</Text>
+              </View>
+              <View style={s.carryoverInfo}>
+                <Text style={s.carryoverTitle}>Önceki Dönemden Devreden Bakiye</Text>
+              </View>
+              <View style={s.carryoverAmountBox}>
+                <Text style={[s.carryoverAmount, { color: carryoverBalance >= 0 ? '#1B5E20' : '#C62828' }]}>
+                  {carryoverBalance >= 0 ? '+' : ''}{fmt(carryoverBalance)}
+                </Text>
+              </View>
+            </View>
+          )}
 
           {filteredTransactions.length === 0 ? (
             <View style={s.emptyStateBox}>
@@ -1746,6 +1933,7 @@ export default function App() {
         currency={currency}
         onClose={() => { setTxScreenVisible(false); setEditingTx(null); }}
         onSave={handleTxSave}
+        onDelete={handleDelete}
         onAddNewCategory={(type) => {
           setNewCategoryType(type);
           setNewCategoryName('');
@@ -1846,7 +2034,7 @@ export default function App() {
           <View style={s.menuBox}>
             {[
               { label:'Dönem Değiştir', icon:'📅', onPress:()=>{ setMenuVisible(false); setPeriodModalVisible(true); } },
-              { label:'Hesap Değiştir', icon:'🏦', onPress:()=>{ setMenuVisible(false); setAccountModalVisible(true); } },
+              { label:'Gelir & Gider İstatistikleri', icon:'⚖️', onPress:()=>{ setMenuVisible(false); setChartModalVisible(true); } },
               { label:'Sabit & Tekrarlayan İşlemler', icon:'🔁', onPress:()=>{ setMenuVisible(false); setRecurringModalVisible(true); } },
               { label:'Kategori Bütçe Hedefleri', icon:'🎯', onPress:()=>{ setMenuVisible(false); setBudgetModalVisible(true); } },
               { label:'Kategori Yönetimi', icon:'🏷️', onPress:()=>{ setMenuVisible(false); setCategoryModalVisible(true); } },
@@ -1875,68 +2063,6 @@ export default function App() {
         onClose={() => setPeriodModalVisible(false)}
         onSelect={(y, m) => { setFilterYear(y); setFilterMonth(m); }}
       />
-
-      {/* ── HESAP DEĞİŞTİR ── */}
-      <Modal transparent animationType="fade" visible={accountModalVisible} onRequestClose={() => setAccountModalVisible(false)}>
-        <View style={s.modalWrap}>
-          <View style={s.centerCard}>
-            <View style={s.cardHeader}>
-              <Text style={s.cardTitle}>Hesap Değiştir</Text>
-              <TouchableOpacity onPress={() => setAccountModalVisible(false)}><Text style={s.cardClose}>✕</Text></TouchableOpacity>
-            </View>
-            <TouchableOpacity style={[s.accOpt, selectedAccountId==='all' && s.accOptActive]}
-              onPress={async()=>{ setSelectedAccountId('all'); await setActiveAccountId('all'); setAccountModalVisible(false); }}>
-              <Text style={[s.accOptTxt, { flex: 1 }]}>🌐 Tüm Hesaplar</Text>
-              <Text style={[s.accOptBalance, { color: balance >= 0 ? GREEN : RED }]}>{fmt(balance)}</Text>
-              {selectedAccountId==='all' && <Text style={s.accOptCheck}>✓</Text>}
-            </TouchableOpacity>
-            {accounts.map(acc=>(
-              <View key={acc.id} style={{flexDirection:'row', alignItems:'center', gap: 6}}>
-                <TouchableOpacity style={[s.accOpt, {flex:1}, selectedAccountId===acc.id && s.accOptActive]}
-                  onPress={async()=>{ setSelectedAccountId(acc.id); await setActiveAccountId(acc.id); setAccountModalVisible(false); }}>
-                  <Text style={[s.accOptTxt, { flex: 1 }]}>{acc.icon} {acc.name}</Text>
-                  <Text style={[s.accOptBalance, { color: (accountBalances[acc.id] || 0) >= 0 ? GREEN : RED }]}>
-                    {fmt(accountBalances[acc.id] || 0)}
-                  </Text>
-                  {selectedAccountId===acc.id && <Text style={s.accOptCheck}>✓</Text>}
-                </TouchableOpacity>
-                <TouchableOpacity onPress={() => handleDeleteAccount(acc.id, acc.name)} style={s.delAccIcon}>
-                  <Text style={{color: '#999', fontSize: 13}}>✕</Text>
-                </TouchableOpacity>
-              </View>
-            ))}
-            <TouchableOpacity style={s.newAccBtn} onPress={()=>{ setAccountModalVisible(false); setNewAccountModalVisible(true); }}>
-              <Text style={s.newAccBtnTxt}>+ Yeni Hesap Ekle</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
-
-      {/* ── YENİ HESAP EKLE ── */}
-      <Modal transparent animationType="slide" visible={newAccountModalVisible} onRequestClose={() => setNewAccountModalVisible(false)}>
-        <View style={s.modalWrap}>
-          <View style={s.centerCard}>
-            <View style={s.cardHeader}>
-              <Text style={s.cardTitle}>Yeni Hesap Oluştur</Text>
-              <TouchableOpacity onPress={() => setNewAccountModalVisible(false)}><Text style={s.cardClose}>✕</Text></TouchableOpacity>
-            </View>
-            <Text style={s.fLabel}>Hesap Adı</Text>
-            <TextInput style={s.txtInput} placeholder="Örn: Birikim Hesabı, Şirket Kartı..." placeholderTextColor="#AAA" value={newAccountName} onChangeText={setNewAccountName} />
-            <Text style={s.fLabel}>Simge Seçin</Text>
-            <View style={{flexDirection:'row',flexWrap:'wrap',gap:8,marginTop:6}}>
-              {['💵','🏦','💳','🪙','💰','💼','🛒','📈','🏠','🚗'].map(ic=>(
-                <TouchableOpacity key={ic} style={[s.iconBtn, newAccountIcon===ic && s.iconBtnActive]} onPress={()=>setNewAccountIcon(ic)}>
-                  <Text style={{fontSize:22}}>{ic}</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-            <View style={s.formBtns}>
-              <TouchableOpacity style={s.btnVazgec} onPress={() => setNewAccountModalVisible(false)}><Text style={s.btnVazgecTxt}>Vazgeç</Text></TouchableOpacity>
-              <TouchableOpacity style={[s.btnKaydet,{backgroundColor:GREEN}]} onPress={handleCreateAccount}><Text style={s.btnKaydetTxt}>Kaydet</Text></TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
 
       {/* ── KATEGORİ YÖNETİMİ ── */}
       <Modal transparent animationType="fade" visible={categoryModalVisible} onRequestClose={() => setCategoryModalVisible(false)}>
@@ -2031,30 +2157,6 @@ export default function App() {
         <View style={s.modalWrap}>
           <View style={s.centerCard}>
             <Text style={s.reportTitle}>Raporla & Dışa Aktar</Text>
-            <Text style={s.fLabel}>Hesap</Text>
-            <TouchableOpacity style={s.reportDropRow} onPress={() => { setReportAccountOpen(!reportAccountOpen); setReportMethodOpen(false); }}>
-              <Text style={s.reportDropVal}>
-                {reportAccountId==='all' ? '🌐 Tüm Hesaplar' : `${accounts.find(a=>a.id===reportAccountId)?.icon || '💳'} ${accounts.find(a=>a.id===reportAccountId)?.name || ''}`}
-              </Text>
-              <Text style={s.reportDropArrow}>{reportAccountOpen ? '▲' : '▼'}</Text>
-            </TouchableOpacity>
-            {reportAccountOpen && (
-              <View style={s.reportMethodList}>
-                <TouchableOpacity
-                  style={[s.methodItem, s.methodItemBorder, reportAccountId==='all' && { backgroundColor: '#E8F5E9' }]}
-                  onPress={() => { setReportAccountId('all'); setReportAccountOpen(false); }}>
-                  <Text style={[s.methodItemTxt, reportAccountId==='all' && { fontWeight: '700' }]}>🌐 Tüm Hesaplar</Text>
-                </TouchableOpacity>
-                {accounts.map((acc, i, arr) => (
-                  <TouchableOpacity
-                    key={acc.id}
-                    style={[s.methodItem, i < arr.length - 1 && s.methodItemBorder, reportAccountId===acc.id && { backgroundColor: '#E8F5E9' }]}
-                    onPress={() => { setReportAccountId(acc.id); setReportAccountOpen(false); }}>
-                    <Text style={[s.methodItemTxt, reportAccountId===acc.id && { fontWeight: '700' }]}>{acc.icon} {acc.name}</Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            )}
             <ReportDateRow label="Başlangıç" value={reportStart} onChange={setReportStart} />
             <ReportDateRow label="Bitiş" value={reportEnd} onChange={setReportEnd} />
             <Text style={s.fLabel}>Çıktı Formatı</Text>
@@ -2289,6 +2391,28 @@ export default function App() {
             </View>
 
             <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 380 }}>
+              {/* Önceki Aydan Bakiye Devri */}
+              <View style={[ayr.settingRow, { justifyContent: 'space-between' }]}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
+                  <View style={[ayr.settingIconBox, { backgroundColor: '#E0F2F1' }]}><Text style={ayr.settingIcon}>🔄</Text></View>
+                  <View style={ayr.settingTexts}>
+                    <Text style={ayr.settingTitle}>Aylık Bakiye Devri</Text>
+                    <Text style={ayr.settingSubtitle}>
+                      {carryoverEnabled ? 'Açık (Önceki ay bakiyesi eklenir)' : 'Kapalı (Yalnızca o ayın neti)'}
+                    </Text>
+                  </View>
+                </View>
+                <TouchableOpacity
+                  style={[s.toggleBtn, carryoverEnabled && s.toggleBtnActive]}
+                  onPress={async () => {
+                    const nextVal = !carryoverEnabled;
+                    setCarryoverEnabledState(nextVal);
+                    await setCarryoverEnabled(nextVal);
+                  }}>
+                  <View style={[s.toggleKnob, carryoverEnabled && s.toggleKnobActive]} />
+                </TouchableOpacity>
+              </View>
+
               {/* Para Birimi */}
               <TouchableOpacity style={ayr.settingRow} onPress={() => { setAyarlarModalVisible(false); setCurrencyModalVisible(true); }}>
                 <View style={ayr.settingIconBox}><Text style={ayr.settingIcon}>💱</Text></View>
@@ -2299,15 +2423,6 @@ export default function App() {
                 <Text style={ayr.settingArrow}>›</Text>
               </TouchableOpacity>
 
-              {/* Hesap Yönetimi */}
-              <TouchableOpacity style={ayr.settingRow} onPress={() => { setAyarlarModalVisible(false); setAccountModalVisible(true); }}>
-                <View style={ayr.settingIconBox}><Text style={ayr.settingIcon}>🏦</Text></View>
-                <View style={ayr.settingTexts}>
-                  <Text style={ayr.settingTitle}>Hesap Yönetimi</Text>
-                  <Text style={ayr.settingSubtitle}>{accounts.length} Hesap ({selectedAccountId === 'all' ? 'Tüm Hesaplar Aktif' : accounts.find(a => a.id === selectedAccountId)?.name})</Text>
-                </View>
-                <Text style={ayr.settingArrow}>›</Text>
-              </TouchableOpacity>
 
               {/* Kategori Yönetimi */}
               <TouchableOpacity style={ayr.settingRow} onPress={() => { setAyarlarModalVisible(false); setCategoryModalVisible(true); }}>
@@ -3044,7 +3159,16 @@ const s = StyleSheet.create({
   },
   heroLabel: { fontSize: 11, fontWeight: '800', color: '#80CBC4', letterSpacing: 1.2, textAlign: 'center' },
   heroAmount: { fontSize: 32, fontWeight: '900', color: '#FFFFFF', textAlign: 'center', marginVertical: 6 },
-  heroBadgesRow: { flexDirection: 'row', justifyContent: 'center', gap: 8, marginTop: 4 },
+  heroBadgesRow: { flexDirection: 'row', justifyContent: 'center', flexWrap: 'wrap', gap: 6, marginTop: 4 },
+  heroBadgeDevir: {
+    backgroundColor: 'rgba(255,255,255,0.18)',
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.3)',
+  },
+  heroBadgeDevirTxt: { color: '#FFF', fontSize: 12, fontWeight: '800' },
   heroBadgeInc: {
     backgroundColor: 'rgba(0,0,0,0.25)',
     paddingHorizontal: 12,
@@ -3081,6 +3205,7 @@ const s = StyleSheet.create({
   },
   heroActionIcon: { fontSize: 16, marginBottom: 2 },
   heroActionTxt: { color: '#FFFFFF', fontSize: 11, fontWeight: '700' },
+  heroActionAmt: { fontSize: 11, fontWeight: '800', marginTop: 2, paddingHorizontal: 2 },
 
   // Hesaplar Şeridi
   accountSection: { marginTop: 16, marginBottom: 4 },
@@ -3110,6 +3235,28 @@ const s = StyleSheet.create({
   txSectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, paddingHorizontal: 2 },
   txSectionTitle: { fontSize: 13, fontWeight: '800', color: '#37474F', textTransform: 'uppercase', letterSpacing: 0.5 },
   txCountBadge: { fontSize: 11, fontWeight: '700', color: '#00897B', backgroundColor: '#E0F2F1', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 10 },
+
+  // Devreden Bakiye Kartı
+  carryoverCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F0FAF8',
+    padding: 12,
+    borderRadius: 14,
+    marginBottom: 10,
+    borderWidth: 1.5,
+    borderColor: '#B2DFDB',
+    elevation: 2,
+    shadowColor: '#00796B',
+    shadowOpacity: 0.08,
+    shadowRadius: 4,
+  },
+  carryoverIconBox: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#E0F2F1', justifyContent: 'center', alignItems: 'center', marginRight: 12 },
+  carryoverInfo: { flex: 1 },
+  carryoverTitle: { fontSize: 14, fontWeight: '800', color: '#004D40' },
+  carryoverSub: { fontSize: 11, color: '#00796B', marginTop: 2, fontWeight: '500' },
+  carryoverAmountBox: { alignItems: 'flex-end', marginLeft: 8 },
+  carryoverAmount: { fontSize: 15, fontWeight: '900' },
 
   // Modern İşlem Kartı
   modernTxCard: {

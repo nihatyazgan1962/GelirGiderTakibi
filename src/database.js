@@ -1,14 +1,16 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-const TRANSACTIONS_KEY = '@gelir_gider_tx_v2';
+const TRANSACTIONS_KEY = '@gelir_gider_tx_v6';
+const PURGE_ALL_FLAG_KEY = '@gelir_gider_purge_v6';
 const ACCOUNTS_KEY = '@gelir_gider_accounts_v2';
 const ACTIVE_ACCOUNT_KEY = '@gelir_gider_active_account_v2';
 const CURRENCY_KEY = '@gelir_gider_currency_v1';
-const CATEGORIES_KEY = '@gelir_gider_categories_v1';
+const CATEGORIES_KEY = '@gelir_gider_categories_v2';
 const PIN_KEY = '@gelir_gider_pin_v1';
 const PIN_ENABLED_KEY = '@gelir_gider_pin_enabled_v1';
-const RECURRING_KEY = '@gelir_gider_recurring_v1';
+const RECURRING_KEY = '@gelir_gider_recurring_v2';
 const BUDGETS_KEY = '@gelir_gider_budgets_v1';
+const CARRYOVER_KEY = '@gelir_gider_carryover_v1';
 
 export const DEFAULT_ACCOUNTS = [
   { id: 'acc_nakit', name: 'Nakit Cüzdan', icon: '💵' },
@@ -19,6 +21,7 @@ export const DEFAULT_ACCOUNTS = [
 export const DEFAULT_GIDER_CATEGORIES = [
   'Ödemeler',
   'Market',
+  'K. Kartı',
   'Kira',
   'Fatura',
   'Ulaşım',
@@ -59,7 +62,15 @@ export const INITIAL_TRANSACTIONS = [];
 export async function getAccounts() {
   try {
     const data = await AsyncStorage.getItem(ACCOUNTS_KEY);
-    if (data) return JSON.parse(data);
+    if (data) {
+      const parsed = JSON.parse(data);
+      // "2027 EKİM" gibi yanlışlıkla hesap olarak eklenmiş kayıtları filtrele ve temizle
+      const filtered = parsed.filter(a => a.name !== '2027 EKİM' && !a.name.toLowerCase().includes('2027'));
+      if (filtered.length !== parsed.length) {
+        await AsyncStorage.setItem(ACCOUNTS_KEY, JSON.stringify(filtered));
+      }
+      return filtered.length > 0 ? filtered : DEFAULT_ACCOUNTS;
+    }
     await AsyncStorage.setItem(ACCOUNTS_KEY, JSON.stringify(DEFAULT_ACCOUNTS));
     return DEFAULT_ACCOUNTS;
   } catch (e) {
@@ -104,6 +115,26 @@ export async function deleteAccount(id) {
     return updated;
   } catch (e) {
     return null;
+  }
+}
+
+// ── AYLIK BAKİYE DEVRİ AYARI (Önceki Aydan Devreden Bakiye) ──────────────────
+export async function getCarryoverEnabled() {
+  try {
+    const val = await AsyncStorage.getItem(CARRYOVER_KEY);
+    if (val === null) return true; // varsayılan olarak açık
+    return val === 'true';
+  } catch (e) {
+    return true;
+  }
+}
+
+export async function setCarryoverEnabled(enabled) {
+  try {
+    await AsyncStorage.setItem(CARRYOVER_KEY, enabled ? 'true' : 'false');
+    return true;
+  } catch (e) {
+    return false;
   }
 }
 
@@ -155,6 +186,39 @@ export async function deleteCategory(type, categoryName) {
 // ── İŞLEMLER (TRANSACTIONS) ─────────────────────────────────────────────────
 export async function getTransactions() {
   try {
+    const isPurged = await AsyncStorage.getItem(PURGE_ALL_FLAG_KEY);
+    if (!isPurged) {
+      try {
+        const allKeys = await AsyncStorage.getAllKeys();
+        const oldKeys = allKeys.filter(k =>
+          k.startsWith('@gelir_gider_tx') ||
+          k.startsWith('@gelir_gider_recurring') ||
+          k.startsWith('@gelir_gider_purge') ||
+          k.startsWith('@hesabim_')
+        );
+        if (oldKeys.length > 0) {
+          await AsyncStorage.multiRemove(oldKeys);
+        }
+      } catch (err) {
+        await AsyncStorage.multiRemove([
+          '@gelir_gider_tx_v1',
+          '@gelir_gider_tx_v2',
+          '@gelir_gider_tx_v3',
+          '@gelir_gider_tx_v4',
+          '@gelir_gider_tx_v5',
+          '@gelir_gider_tx_v6',
+          '@gelir_gider_purge_v5',
+          '@gelir_gider_recurring_v1',
+          '@gelir_gider_recurring_v2',
+          '@hesabim_auto_snapshots_v1',
+          '@hesabim_last_cloud_backup_v1',
+        ]);
+      }
+      await AsyncStorage.setItem(TRANSACTIONS_KEY, JSON.stringify([]));
+      await AsyncStorage.setItem(PURGE_ALL_FLAG_KEY, 'true');
+      return [];
+    }
+
     const data = await AsyncStorage.getItem(TRANSACTIONS_KEY);
     if (data !== null) return JSON.parse(data);
     await AsyncStorage.setItem(TRANSACTIONS_KEY, JSON.stringify(INITIAL_TRANSACTIONS));
@@ -199,7 +263,33 @@ export async function deleteTransaction(id) {
 
 export async function clearAllTransactions() {
   try {
+    try {
+      const allKeys = await AsyncStorage.getAllKeys();
+      const oldKeys = allKeys.filter(k =>
+        k.startsWith('@gelir_gider_tx') ||
+        k.startsWith('@gelir_gider_recurring') ||
+        k.startsWith('@hesabim_')
+      );
+      if (oldKeys.length > 0) {
+        await AsyncStorage.multiRemove(oldKeys);
+      }
+    } catch (err) {
+      await AsyncStorage.multiRemove([
+        '@gelir_gider_tx_v1',
+        '@gelir_gider_tx_v2',
+        '@gelir_gider_tx_v3',
+        '@gelir_gider_tx_v4',
+        '@gelir_gider_tx_v5',
+        '@gelir_gider_tx_v6',
+        '@gelir_gider_purge_v5',
+        '@gelir_gider_recurring_v1',
+        '@gelir_gider_recurring_v2',
+        '@hesabim_auto_snapshots_v1',
+        '@hesabim_last_cloud_backup_v1',
+      ]);
+    }
     await AsyncStorage.setItem(TRANSACTIONS_KEY, JSON.stringify([]));
+    await AsyncStorage.setItem(PURGE_ALL_FLAG_KEY, 'true');
     return [];
   } catch (e) {
     return null;
@@ -388,3 +478,4 @@ export async function importAllData(jsonString) {
     return false;
   }
 }
+
